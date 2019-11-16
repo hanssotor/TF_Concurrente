@@ -3,23 +3,174 @@ package main
 import (
 	"bufio"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
 )
 
+type MessageType int32
+
 const (
-	NEW_ACADEMIC_RECORD    = 1
-	UPDATE_ACADEMIC_RECORD = 2
-	LIST_ACADEMIC_RECORD   = 3
-	LIST_HOSTS             = 4
+	NEW_ACADEMIC_RECORD                = 1
+	UPDATE_ACADEMIC_RECORD             = 2
+	LIST_ACADEMIC_RECORD               = 3
+	LIST_HOSTS                         = 4
+	PROTOCOL                           = "tcp"
+	NEW_HOST               MessageType = 0
+	ADD_HOST               MessageType = 1
+	ADD_BLOCK              MessageType = 2
+	NEW_BLOCK              MessageType = 3
+	SET_BLOCKS             MessageType = 4
 )
+
+/* [SERVER] END */
 
 var localHost string
 var hosts []string
 
-/* [BLOCKCHAIN] START*/
+type MessageBody struct {
+	MessageType MessageType
+	Message     string
+}
+
+func GetMessage(conn net.Conn) string {
+	reader := bufio.NewReader(conn)
+	data, _ := reader.ReadString('\n')
+	return strings.TrimSpace(data)
+}
+
+func SendMessage(toHost string, message string) {
+	conn, _ := net.Dial(PROTOCOL, toHost)
+	defer conn.Close()
+	fmt.Fprintln(conn, message)
+}
+
+func SendMessageWithReply(toHost string, message string) string {
+	conn, _ := net.Dial(PROTOCOL, toHost)
+	defer conn.Close()
+	fmt.Fprintln(conn, message)
+	return GetMessage(conn)
+}
+
+func RemoveHost(index int, hosts []string) []string {
+	n := len(hosts)
+	hosts[index] = hosts[n-1]
+	hosts[n-1] = ""
+	return hosts[:n-1]
+}
+
+func RemoveHostByValue(ip string, hosts []string) []string {
+	for index, host := range hosts {
+		if host == ip {
+			return RemoveHost(index, hosts)
+		}
+	}
+	return hosts
+}
+
+func Broadcast(newHost string) {
+	for _, host := range hosts {
+		sendData := append(hosts, newHost, localHost)
+		sendData = RemoveHostByValue(host, sendData)
+		sendBody := MessageBody{
+			MessageType: ADD_HOST,
+			Message:     strings.Join(sendData, ","),
+		}
+		sendJson, _ := json.Marshal(sendBody)
+		SendMessage(host, string(sendJson))
+	}
+}
+
+func BroadcastBlock(newBlock Block) {
+	for _, host := range hosts {
+		sendData, _ := json.Marshal(newBlock)
+		sendBody := MessageBody{
+			MessageType: ADD_BLOCK,
+			Message:     string(sendData),
+		}
+		sendJson, _ := json.Marshal(sendBody)
+		SendMessage(host, string(sendJson))
+	}
+}
+
+func Server() {
+	ln, _ := net.Listen(PROTOCOL, localHost)
+	defer ln.Close()
+	for {
+		conn, _ := ln.Accept()
+		defer conn.Close()
+		recieveBody := MessageBody{}
+		data := GetMessage(conn)
+		_ = json.Unmarshal([]byte(data), &recieveBody)
+
+		switch recieveBody.MessageType {
+		case NEW_HOST:
+			/*
+				1) Sucede cuando un nuevo cliente se conecta
+				2) Recibimos la [IP:PORT] del cliente
+				3) Una vez recibido:
+				- Enviamos al cliente nuestro directorio de hosts
+				- Enviamos a todos los hosts en nuestro directorio la [IP:PORT] del cliente
+				- Finalmente, agregamos la [IP:PORT] del cliente a nuestro directorio de hosts
+			*/
+			clientHost := recieveBody.Message
+			totalHost := strings.Join(append(hosts, localHost), ",")
+			sendBody := MessageBody{
+				MessageType: ADD_HOST,
+				Message:     totalHost,
+			}
+			sendJson, _ := json.Marshal(sendBody)
+			SendMessage(clientHost, string(sendJson))
+			Broadcast(clientHost)
+			hosts = append(hosts, clientHost)
+		case ADD_HOST:
+			/*
+				1) Sucede cuando un nuevo cliente se conecta, después de "NEW_HOST"
+				2) Como este nuevo cliente no tiene las direcciones de todos
+				3) El host "destHost" es quien se encarga de comunicar a todos
+				2) Enviamos la [IP:PORT] del cliente a todos los host del directorio
+			*/
+			clientHost := recieveBody.Message
+			hosts = strings.Split(clientHost, ",")
+		case NEW_BLOCK:
+			/*
+				1) Sucede cuando un nuevo cliente se conecta
+				2) El cliente recibe del "destHost" la blockchain
+			*/
+			clientHost := recieveBody.Message
+			sendJson, _ := json.Marshal(localBlockChain.Chain)
+			sendBody := MessageBody{
+				MessageType: SET_BLOCKS,
+				Message:     string(sendJson),
+			}
+			sendMsg, _ := json.Marshal(sendBody)
+			SendMessage(clientHost, string(sendMsg))
+		case SET_BLOCKS:
+			/*
+				1) Sucede luego de "NEW_BLOCK"
+				2) Recibimos del cliente la blockchain
+			*/
+			clientBlockChain := recieveBody.Message
+			_ = json.Unmarshal([]byte(clientBlockChain), &localBlockChain.Chain)
+		case ADD_BLOCK:
+			/*
+				1) Sucede luego de "BroadcastBlock"
+				2) Recibimos del cliente un nuevo block
+			*/
+			clientBlock := recieveBody.Message
+			block := Block{}
+			json.Unmarshal([]byte(clientBlock), &block)
+			localBlockChain.Chain = append(localBlockChain.Chain, block)
+		}
+	}
+}
+
+/* [SERVER] END */
+
+/* [BLOCKCHAIN] START */
 
 var localBlockChain BlockChain
 
@@ -127,7 +278,7 @@ func NewRecord() {
 		Data: record,
 	}
 	localBlockChain.AddBlock(newBlock)
-	//BroadcastBlock(newBlock)
+	BroadcastBlock(newBlock)
 	fmt.Println("You have registered successfully.")
 	time.Sleep(2 * time.Second)
 }
@@ -174,8 +325,25 @@ func main() {
 	destHost, _ = in.ReadString('\n')
 	destHost = strings.TrimSpace(destHost)
 
-	fmt.Println("==== Welcome to Academic Block APP ====")
 	localBlockChain = CreateBlockChain()
+	go Server()
+
+	fmt.Println("==== Welcome to Academic Block APP ====")
+
+	if destHost != "" {
+		sendBody := MessageBody{
+			MessageType: NEW_HOST,
+			Message:     localHost,
+		}
+		sendJson, _ := json.Marshal(sendBody)
+		SendMessage(destHost, string(sendJson))
+		sendBody = MessageBody{
+			MessageType: NEW_BLOCK,
+			Message:     localHost,
+		}
+		sendJson, _ = json.Marshal(sendBody)
+		SendMessage(destHost, string(sendJson))
+	}
 
 	for {
 		fmt.Println("==== Menu option ====")
