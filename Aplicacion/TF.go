@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+	"github.com/sajari/regression"
+	"strconv"
 )
 
 type MessageType int32
@@ -175,12 +177,21 @@ func Server() {
 var localBlockChain BlockChain
 
 type AcademicRecord struct {
-	Name         string
+	/*Name         string
 	Year         string
 	University   string
 	Course       string
 	Teacher      string
-	Calification string
+	Calification string*/
+	Nombre        string
+	Carrera       string
+	Ciclo         string
+	Nivel         string
+	Universidad   string
+	Promedio      string
+	NumCursos     string
+	Creditos      string
+
 }
 
 type Block struct {
@@ -252,27 +263,46 @@ func NewRecord() {
 	fmt.Println("==== New academic record ====")
 	in := bufio.NewReader(os.Stdin)
 	fmt.Println("*Please enter the next information.")
-	fmt.Print("Name: ")
-	name, _ := in.ReadString('\n')
-	name = strings.TrimSpace(name)
-	fmt.Print("Year: ")
-	year, _ := in.ReadString('\n')
-	year = strings.TrimSpace(year)
-	fmt.Print("University: ")
-	university, _ := in.ReadString('\n')
-	university = strings.TrimSpace(university)
-	fmt.Print("Course: ")
-	course, _ := in.ReadString('\n')
-	course = strings.TrimSpace(course)
-	fmt.Print("Calification: ")
-	calification, _ := in.ReadString('\n')
-	calification = strings.TrimSpace(calification)
+	fmt.Print("Nombre: ")
+	nombre, _ := in.ReadString('\n')
+	nombre = strings.TrimSpace(nombre)
+	fmt.Print("Carrera: ")
+	carrera, _ := in.ReadString('\n')
+	carrera = strings.TrimSpace(carrera)
+	fmt.Print("Ciclo: ")
+	ciclo, _ := in.ReadString('\n')
+	ciclo = strings.TrimSpace(ciclo)
+	fmt.Print("Nivel: ")
+	nivel, _ := in.ReadString('\n')
+	nivel = strings.TrimSpace(nivel)
+	fmt.Print("Universidad: ")
+	universidad, _ := in.ReadString('\n')
+	universidad = strings.TrimSpace(universidad)
+	fmt.Print("Promedio: ")
+	promedio, _ := in.ReadString('\n')
+	promedio = strings.TrimSpace(promedio)
+	fmt.Print("Numero de cursos: ")
+	numcursos, _ := in.ReadString('\n')
+	numcursos = strings.TrimSpace(numcursos)
+	fmt.Print("Numero de creditos: ")
+	creditos, _ := in.ReadString('\n')
+	creditos = strings.TrimSpace(creditos)
+
 	record := AcademicRecord{
-		Name:         name,
+		/*Name:        name,
 		Year:         year,
 		University:   university,
 		Course:       course,
-		Calification: calification,
+		Calification: calification,*/
+		Nombre:          nombre,
+		Carrera:         carrera,
+		Ciclo:           ciclo,
+		Nivel:           nivel,
+		Universidad:     universidad,
+		Promedio:        promedio,
+		NumCursos:       numcursos,
+		Creditos:        creditos,
+
 	}
 	newBlock := Block{
 		Data: record,
@@ -292,12 +322,15 @@ func ListRecord() {
 	fmt.Printf("==== List academic records [Total: %d] ====\n", len(blocks))
 	for index, block := range blocks {
 		record := block.Data
-		fmt.Printf("Record [#%d]\n", index+1)
-		fmt.Printf(" Name: %s\n", record.Name)
-		fmt.Printf(" Year: %s\n", record.Year)
-		fmt.Printf(" University: %s\n", record.University)
-		fmt.Printf(" Course: %s\n", record.Course)
-		fmt.Printf(" Calification: %s\n", record.Calification)
+		fmt.Printf(" Record [#%d]\n", index+1)
+		fmt.Printf(" Nombre: %s\n", record.Nombre)
+		fmt.Printf(" Carrera: %s\n", record.Carrera)
+		fmt.Printf(" Ciclo: %s\n", record.Ciclo)
+		fmt.Printf(" Universidad: %s\n", record.Universidad)
+		fmt.Printf(" Promedio: %s\n", record.Promedio)
+		fmt.Printf(" Numero de cursos: %s\n", record.NumCursos)
+		fmt.Printf(" Numero de creditos: %s\n", record.Creditos)
+
 	}
 }
 
@@ -311,7 +344,26 @@ func ListHost() {
 	}
 }
 
+func Prededcir_Promedio(r regression.Regression, record AcademicRecord ){
+	cur, _ := strconv.ParseFloat(record.NumCursos,64)
+	cred, _ := strconv.ParseFloat(record.Creditos,64)
+	niv, _ := strconv.ParseFloat(record.Nivel,64)
+	prediction,_ := r.Predict([]float64{cur, cred, niv})
+	fmt.Printf("Prediction:\n%v\n", prediction)
+}
+
 func main() {
+	r := new(regression.Regression)
+	r.SetObserved("Promedio esperado")
+	r.SetVar(0, "Numero de cursos")                                  
+	r.SetVar(1, "Numero de creditos")             
+	r.SetVar(2, "Nivel")  
+	/*r.Train(
+		filas aqui
+
+	)
+	r.Run() */                         
+
 	var destHost string
 	var option int
 	in := bufio.NewReader(os.Stdin)
