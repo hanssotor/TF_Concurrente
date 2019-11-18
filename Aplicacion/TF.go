@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/csv"
+	"log"
+	"io"
 	"fmt"
 	"net"
 	"os"
@@ -20,6 +23,7 @@ const (
 	UPDATE_ACADEMIC_RECORD             = 2
 	LIST_ACADEMIC_RECORD               = 3
 	LIST_HOSTS                         = 4
+	PREDICT                            = 5
 	PROTOCOL                           = "tcp"
 	NEW_HOST               MessageType = 0
 	ADD_HOST               MessageType = 1
@@ -36,6 +40,26 @@ var hosts []string
 type MessageBody struct {
 	MessageType MessageType
 	Message     string
+}
+
+func errHandle(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func parseRecord(record []string) AcademicRecord {
+	var rec AcademicRecord
+	rec.Nombre = record[0]
+	rec.Carrera = record[1]
+	rec.Ciclo = record[2]
+	rec.Nivel = record[3]
+	rec.Universidad = record[4]
+	rec.Promedio = record[5]
+	rec.NumCursos = record[6]
+	rec.Creditos = record[7]
+
+	return rec
 }
 
 func GetMessage(conn net.Conn) string {
@@ -177,12 +201,6 @@ func Server() {
 var localBlockChain BlockChain
 
 type AcademicRecord struct {
-	/*Name         string
-	Year         string
-	University   string
-	Course       string
-	Teacher      string
-	Calification string*/
 	Nombre        string
 	Carrera       string
 	Ciclo         string
@@ -191,6 +209,7 @@ type AcademicRecord struct {
 	Promedio      string
 	NumCursos     string
 	Creditos      string
+	Promedio_esperado   float64
 
 }
 
@@ -289,11 +308,6 @@ func NewRecord() {
 	creditos = strings.TrimSpace(creditos)
 
 	record := AcademicRecord{
-		/*Name:        name,
-		Year:         year,
-		University:   university,
-		Course:       course,
-		Calification: calification,*/
 		Nombre:          nombre,
 		Carrera:         carrera,
 		Ciclo:           ciclo,
@@ -344,26 +358,52 @@ func ListHost() {
 	}
 }
 
-func Prededcir_Promedio(r regression.Regression, record AcademicRecord ){
-	cur, _ := strconv.ParseFloat(record.NumCursos,64)
-	cred, _ := strconv.ParseFloat(record.Creditos,64)
-	niv, _ := strconv.ParseFloat(record.Nivel,64)
-	prediction,_ := r.Predict([]float64{cur, cred, niv})
-	fmt.Printf("Prediction:\n%v\n", prediction)
-}
-
-func main() {
+func Predict(){
+	dataSetArc, err := os.Open("Records.csv")
+	errHandle(err)
+	defer dataSetArc.Close()
+	reader := csv.NewReader(dataSetArc)
+	reader.Comma = ','
+	var dataSet []AcademicRecord
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		errHandle(err)
+		dataSet = append(dataSet, parseRecord(record))
+	}
 	r := new(regression.Regression)
 	r.SetObserved("Promedio esperado")
 	r.SetVar(0, "Numero de cursos")                                  
 	r.SetVar(1, "Numero de creditos")             
 	r.SetVar(2, "Nivel")  
-	/*r.Train(
-		filas aqui
+	for i:=0; i<len(dataSet); i++ {
+		prom, _ := strconv.ParseFloat(dataSet[i].Promedio,64)
+		cur, _ := strconv.ParseFloat(dataSet[i].NumCursos,64)
+		cred, _ := strconv.ParseFloat(dataSet[i].Creditos,64)
+		niv, _ := strconv.ParseFloat(dataSet[i].Nivel,64)
+		r.Train(regression.DataPoint(prom, []float64{cur, cred, niv}))
+	}
+	r.Run()
+	var curs float64
+	var creds float64
+	var nivs float64
 
-	)
-	r.Run() */                         
+	fmt.Print("Ingrese los datos del estudiante:\n")
+	fmt.Print("Numero de cursos que lleva: ")
+	fmt.Scanf("%f\n", &curs)
+	fmt.Print("Numero de creditos que lleva: ")
+	fmt.Scanf("%f\n", &creds)
+	fmt.Print("Nivel (ciclo) en que se encuentra: ")
+	fmt.Scanf("%f\n", &nivs)
+	prediction,_ := r.Predict([]float64{curs, creds, nivs})
+	fmt.Printf("Regression formula:\n%v\n", r.Formula)
+	fmt.Printf("El promedio esperado es de:\n%v\n", prediction)
 
+}
+
+func main() {
 	var destHost string
 	var option int
 	in := bufio.NewReader(os.Stdin)
@@ -398,8 +438,8 @@ func main() {
 	}
 
 	for {
-		fmt.Println("==== Menu option ====")
-		fmt.Print("1. New academic record\n2. Update academic record\n3. List academic records\n4. List hosts\n")
+		fmt.Println("==== Menu de opciones ====")
+		fmt.Print("1. Nuevo registro academico\n2. Actualizar registro academico\n3. Listar registros academicos\n4. Listar hosts\n5. Predecir\n")
 		fmt.Print("Enter option [1|2|3|4]: ")
 		fmt.Scanf("%d\n", &option)
 
@@ -412,6 +452,8 @@ func main() {
 			ListRecord()
 		case LIST_HOSTS:
 			ListHost()
+		case PREDICT:
+			Predict()
 		default:
 			fmt.Println("Enter option is no valid, please try again.")
 		}
