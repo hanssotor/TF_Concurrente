@@ -1,3 +1,6 @@
 Notas para el equipo
 ====================
 Sirvase en poner sus apuntes/notas lineas abajo:
+
+1) TF.go: Aplicación en GO para el trabajo final, Blockchain y Machine Learning.
+2) TG.pml: Aplicación en Promela que valida el correcto uso de canales en nuestro trabajo final.
