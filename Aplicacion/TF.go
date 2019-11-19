@@ -3,33 +3,33 @@ package main
 import (
 	"bufio"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/csv"
-	"log"
-	"io"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
 	"github.com/sajari/regression"
-	"strconv"
 )
 
 type MessageType int32
 
 const (
-	NEW_ACADEMIC_RECORD                = 1
-	UPDATE_ACADEMIC_RECORD             = 2
-	LIST_ACADEMIC_RECORD               = 3
-	LIST_HOSTS                         = 4
-	PREDICT                            = 5
-	PROTOCOL                           = "tcp"
-	NEW_HOST               MessageType = 0
-	ADD_HOST               MessageType = 1
-	ADD_BLOCK              MessageType = 2
-	NEW_BLOCK              MessageType = 3
-	SET_BLOCKS             MessageType = 4
+	NEW_ACADEMIC_RECORD              = 1
+	LIST_ACADEMIC_RECORD             = 2
+	LIST_HOSTS                       = 3
+	PREDICT                          = 4
+	PROTOCOL                         = "tcp"
+	NEW_HOST             MessageType = 0
+	ADD_HOST             MessageType = 1
+	ADD_BLOCK            MessageType = 2
+	NEW_BLOCK            MessageType = 3
+	SET_BLOCKS           MessageType = 4
 )
 
 /* [SERVER] END */
@@ -122,75 +122,80 @@ func BroadcastBlock(newBlock Block) {
 	}
 }
 
-func Server() {
+func Server(updatedBlocks chan<- int) {
 	ln, _ := net.Listen(PROTOCOL, localHost)
 	defer ln.Close()
 	for {
 		conn, _ := ln.Accept()
-		defer conn.Close()
-		recieveBody := MessageBody{}
-		data := GetMessage(conn)
-		_ = json.Unmarshal([]byte(data), &recieveBody)
+		go Handle(conn, updatedBlocks)
+	}
+}
 
-		switch recieveBody.MessageType {
-		case NEW_HOST:
-			/*
-				1) Sucede cuando un nuevo cliente se conecta
-				2) Recibimos la [IP:PORT] del cliente
-				3) Una vez recibido:
-				- Enviamos al cliente nuestro directorio de hosts
-				- Enviamos a todos los hosts en nuestro directorio la [IP:PORT] del cliente
-				- Finalmente, agregamos la [IP:PORT] del cliente a nuestro directorio de hosts
-			*/
-			clientHost := recieveBody.Message
-			totalHost := strings.Join(append(hosts, localHost), ",")
-			sendBody := MessageBody{
-				MessageType: ADD_HOST,
-				Message:     totalHost,
-			}
-			sendJson, _ := json.Marshal(sendBody)
-			SendMessage(clientHost, string(sendJson))
-			Broadcast(clientHost)
-			hosts = append(hosts, clientHost)
-		case ADD_HOST:
-			/*
-				1) Sucede cuando un nuevo cliente se conecta, después de "NEW_HOST"
-				2) Como este nuevo cliente no tiene las direcciones de todos
-				3) El host "destHost" es quien se encarga de comunicar a todos
-				2) Enviamos la [IP:PORT] del cliente a todos los host del directorio
-			*/
-			clientHost := recieveBody.Message
-			hosts = strings.Split(clientHost, ",")
-		case NEW_BLOCK:
-			/*
-				1) Sucede cuando un nuevo cliente se conecta
-				2) El cliente recibe del "destHost" la blockchain
-			*/
-			clientHost := recieveBody.Message
-			sendJson, _ := json.Marshal(localBlockChain.Chain)
-			sendBody := MessageBody{
-				MessageType: SET_BLOCKS,
-				Message:     string(sendJson),
-			}
-			sendMsg, _ := json.Marshal(sendBody)
-			SendMessage(clientHost, string(sendMsg))
-		case SET_BLOCKS:
-			/*
-				1) Sucede luego de "NEW_BLOCK"
-				2) Recibimos del cliente la blockchain
-			*/
-			clientBlockChain := recieveBody.Message
-			_ = json.Unmarshal([]byte(clientBlockChain), &localBlockChain.Chain)
-		case ADD_BLOCK:
-			/*
-				1) Sucede luego de "BroadcastBlock"
-				2) Recibimos del cliente un nuevo block
-			*/
-			clientBlock := recieveBody.Message
-			block := Block{}
-			json.Unmarshal([]byte(clientBlock), &block)
-			localBlockChain.Chain = append(localBlockChain.Chain, block)
+func Handle(conn net.Conn, updatedBlocks chan<- int) {
+	defer conn.Close()
+	recieveBody := MessageBody{}
+	data := GetMessage(conn)
+	_ = json.Unmarshal([]byte(data), &recieveBody)
+
+	switch recieveBody.MessageType {
+	case NEW_HOST:
+		/*
+			1) Sucede cuando un nuevo cliente se conecta
+			2) Recibimos la [IP:PORT] del cliente
+			3) Una vez recibido:
+			- Enviamos al cliente nuestro directorio de hosts
+			- Enviamos a todos los hosts en nuestro directorio la [IP:PORT] del cliente
+			- Finalmente, agregamos la [IP:PORT] del cliente a nuestro directorio de hosts
+		*/
+		clientHost := recieveBody.Message
+		totalHost := strings.Join(append(hosts, localHost), ",")
+		sendBody := MessageBody{
+			MessageType: ADD_HOST,
+			Message:     totalHost,
 		}
+		sendJson, _ := json.Marshal(sendBody)
+		SendMessage(clientHost, string(sendJson))
+		Broadcast(clientHost)
+		hosts = append(hosts, clientHost)
+	case ADD_HOST:
+		/*
+			1) Sucede cuando un nuevo cliente se conecta, después de "NEW_HOST"
+			2) Como este nuevo cliente no tiene las direcciones de todos
+			3) El host "destHost" es quien se encarga de comunicar a todos
+			2) Enviamos la [IP:PORT] del cliente a todos los host del directorio
+		*/
+		clientHost := recieveBody.Message
+		hosts = strings.Split(clientHost, ",")
+	case NEW_BLOCK:
+		/*
+			1) Sucede cuando un nuevo cliente se conecta
+			2) El cliente recibe del "destHost" la blockchain
+		*/
+		clientHost := recieveBody.Message
+		sendJson, _ := json.Marshal(localBlockChain.Chain)
+		sendBody := MessageBody{
+			MessageType: SET_BLOCKS,
+			Message:     string(sendJson),
+		}
+		sendMsg, _ := json.Marshal(sendBody)
+		SendMessage(clientHost, string(sendMsg))
+	case SET_BLOCKS:
+		/*
+			1) Sucede luego de "NEW_BLOCK"
+			2) Recibimos del cliente la blockchain
+		*/
+		clientBlockChain := recieveBody.Message
+		_ = json.Unmarshal([]byte(clientBlockChain), &localBlockChain.Chain)
+		updatedBlocks <- 0
+	case ADD_BLOCK:
+		/*
+			1) Sucede luego de "BroadcastBlock"
+			2) Recibimos del cliente un nuevo block
+		*/
+		clientBlock := recieveBody.Message
+		block := Block{}
+		json.Unmarshal([]byte(clientBlock), &block)
+		localBlockChain.Chain = append(localBlockChain.Chain, block)
 	}
 }
 
@@ -201,16 +206,15 @@ func Server() {
 var localBlockChain BlockChain
 
 type AcademicRecord struct {
-	Nombre        string
-	Carrera       string
-	Ciclo         string
-	Nivel         string
-	Universidad   string
-	Promedio      string
-	NumCursos     string
-	Creditos      string
-	Promedio_esperado   float64
-
+	Nombre            string
+	Carrera           string
+	Ciclo             string
+	Nivel             string
+	Universidad       string
+	Promedio          string
+	NumCursos         string
+	Creditos          string
+	Promedio_esperado float64
 }
 
 type Block struct {
@@ -226,7 +230,7 @@ type BlockChain struct {
 }
 
 func (block *Block) CalculateHash() string {
-	src := fmt.Sprintf("%d-%s-%s", block.Index, block.Timestamp.String(), block.Data)
+	src := fmt.Sprintf("%d-%s-%s-s%", block.Index, block.Timestamp.String(), block.Data, block.PreviousHash)
 	return base64.StdEncoding.EncodeToString([]byte(src))
 }
 
@@ -308,15 +312,14 @@ func NewRecord() {
 	creditos = strings.TrimSpace(creditos)
 
 	record := AcademicRecord{
-		Nombre:          nombre,
-		Carrera:         carrera,
-		Ciclo:           ciclo,
-		Nivel:           nivel,
-		Universidad:     universidad,
-		Promedio:        promedio,
-		NumCursos:       numcursos,
-		Creditos:        creditos,
-
+		Nombre:      nombre,
+		Carrera:     carrera,
+		Ciclo:       ciclo,
+		Nivel:       nivel,
+		Universidad: universidad,
+		Promedio:    promedio,
+		NumCursos:   numcursos,
+		Creditos:    creditos,
 	}
 	newBlock := Block{
 		Data: record,
@@ -336,7 +339,7 @@ func ListRecord() {
 	fmt.Printf("==== List academic records [Total: %d] ====\n", len(blocks))
 	for index, block := range blocks {
 		record := block.Data
-		fmt.Printf(" Record [#%d]\n", index+1)
+		fmt.Printf("Record [#%d]\n", index+1)
 		fmt.Printf(" Nombre: %s\n", record.Nombre)
 		fmt.Printf(" Carrera: %s\n", record.Carrera)
 		fmt.Printf(" Ciclo: %s\n", record.Ciclo)
@@ -358,7 +361,7 @@ func ListHost() {
 	}
 }
 
-func Predict(){
+func Predict() {
 	dataSetArc, err := os.Open("Records.csv")
 	errHandle(err)
 	defer dataSetArc.Close()
@@ -375,14 +378,14 @@ func Predict(){
 	}
 	r := new(regression.Regression)
 	r.SetObserved("Promedio esperado")
-	r.SetVar(0, "Numero de cursos")                                  
-	r.SetVar(1, "Numero de creditos")             
-	r.SetVar(2, "Nivel")  
-	for i:=0; i<len(dataSet); i++ {
-		prom, _ := strconv.ParseFloat(dataSet[i].Promedio,64)
-		cur, _ := strconv.ParseFloat(dataSet[i].NumCursos,64)
-		cred, _ := strconv.ParseFloat(dataSet[i].Creditos,64)
-		niv, _ := strconv.ParseFloat(dataSet[i].Nivel,64)
+	r.SetVar(0, "Numero de cursos")
+	r.SetVar(1, "Numero de creditos")
+	r.SetVar(2, "Nivel")
+	for i := 0; i < len(dataSet); i++ {
+		prom, _ := strconv.ParseFloat(dataSet[i].Promedio, 64)
+		cur, _ := strconv.ParseFloat(dataSet[i].NumCursos, 64)
+		cred, _ := strconv.ParseFloat(dataSet[i].Creditos, 64)
+		niv, _ := strconv.ParseFloat(dataSet[i].Nivel, 64)
 		r.Train(regression.DataPoint(prom, []float64{cur, cred, niv}))
 	}
 	r.Run()
@@ -390,6 +393,7 @@ func Predict(){
 	var creds float64
 	var nivs float64
 
+	fmt.Print("==== Prediction ====\n")
 	fmt.Print("Ingrese los datos del estudiante:\n")
 	fmt.Print("Numero de cursos que lleva: ")
 	fmt.Scanf("%f\n", &curs)
@@ -397,13 +401,14 @@ func Predict(){
 	fmt.Scanf("%f\n", &creds)
 	fmt.Print("Nivel (ciclo) en que se encuentra: ")
 	fmt.Scanf("%f\n", &nivs)
-	prediction,_ := r.Predict([]float64{curs, creds, nivs})
+	prediction, _ := r.Predict([]float64{curs, creds, nivs})
 	fmt.Printf("Regression formula:\n%v\n", r.Formula)
 	fmt.Printf("El promedio esperado es de:\n%v\n", prediction)
 
 }
 
 func main() {
+	updatedBlocks := make(chan int)
 	var destHost string
 	var option int
 	in := bufio.NewReader(os.Stdin)
@@ -418,7 +423,7 @@ func main() {
 	destHost = strings.TrimSpace(destHost)
 
 	localBlockChain = CreateBlockChain()
-	go Server()
+	go Server(updatedBlocks)
 
 	fmt.Println("==== Welcome to Academic Block APP ====")
 
@@ -435,19 +440,18 @@ func main() {
 		}
 		sendJson, _ = json.Marshal(sendBody)
 		SendMessage(destHost, string(sendJson))
+		<-updatedBlocks
 	}
 
 	for {
 		fmt.Println("==== Menu de opciones ====")
-		fmt.Print("1. Nuevo registro academico\n2. Actualizar registro academico\n3. Listar registros academicos\n4. Listar hosts\n5. Predecir\n")
+		fmt.Print("1. Nuevo registro academico\n2. Listar registros academicos\n3. Listar hosts\n4. Predecir\n")
 		fmt.Print("Enter option [1|2|3|4]: ")
 		fmt.Scanf("%d\n", &option)
 
 		switch option {
 		case NEW_ACADEMIC_RECORD:
 			NewRecord()
-		case UPDATE_ACADEMIC_RECORD:
-			UpdateRecord()
 		case LIST_ACADEMIC_RECORD:
 			ListRecord()
 		case LIST_HOSTS:
